@@ -112,12 +112,17 @@ fn extract_bucket_keys(agg: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+pub struct LogResult {
+    pub logs: Vec<LogEntry>,
+    pub total: u64,
+}
+
 pub async fn fetch_logs(
     application: &str,
     profile: &str,
     severity: Option<&str>,
     size: i64,
-) -> Result<Vec<LogEntry>> {
+) -> Result<LogResult> {
     let client = create_client().await?;
 
     let mut must = vec![
@@ -134,12 +139,15 @@ pub async fn fetch_logs(
         .body(json!({
             "query": { "bool": { "must": must } },
             "size": size,
-            "sort": [{"@timestamp": "desc"}]
+            "sort": [{"@timestamp": "desc"}],
+            "track_total_hits": true
         }))
         .send()
         .await?;
 
     let body: Value = response.json().await?;
+
+    let total = body["hits"]["total"]["value"].as_u64().unwrap_or(0);
 
     let hits = body["hits"]["hits"]
         .as_array()
@@ -150,5 +158,5 @@ pub async fn fetch_logs(
         .filter_map(|hit| serde_json::from_value(hit["_source"].clone()).ok())
         .collect();
 
-    Ok(logs)
+    Ok(LogResult { logs, total })
 }

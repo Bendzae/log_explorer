@@ -31,16 +31,20 @@ pub fn render(f: &mut Frame, app: &App) {
         Pane::Severity => {
             render_dropdown(f, chunks[0], chunks[1], 2, &app.severity_filter);
         }
+        Pane::Limit => {
+            render_dropdown(f, chunks[0], chunks[1], 3, &app.limit_filter);
+        }
         Pane::Logs => {}
     }
 }
 
 // --- Filter bar (collapsed) ---
 
-const FILTER_CONSTRAINTS: [Constraint; 3] = [
+const FILTER_CONSTRAINTS: [Constraint; 4] = [
     Constraint::Length(25),
     Constraint::Fill(1),
     Constraint::Length(18),
+    Constraint::Length(16),
 ];
 
 fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
@@ -72,6 +76,14 @@ fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
         'S',
         app.focused == Pane::Severity,
         app.severity_filter.selected_value().unwrap_or("—"),
+    );
+    render_filter_chip(
+        f,
+        panes[3],
+        "Limit",
+        'N',
+        app.focused == Pane::Limit,
+        app.limit_filter.selected_value().unwrap_or("—"),
     );
 }
 
@@ -246,6 +258,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         ("P", "profile"),
         ("A", "application"),
         ("S", "severity"),
+        ("N", "limit"),
         ("L", "logs"),
     ] {
         spans.push(Span::styled(
@@ -279,7 +292,17 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
     spans.push(Span::raw(&app.status));
 
-    let bar = Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::ALL));
+    let position = if app.logs.is_empty() {
+        " 0/0 ".to_string()
+    } else {
+        format!(" {}/{} ", app.logs.len(), app.total_hits)
+    };
+
+    let bar = Paragraph::new(Line::from(spans)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(position).right_aligned()),
+    );
     f.render_widget(bar, area);
 }
 

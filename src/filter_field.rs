@@ -32,6 +32,13 @@ impl FilterField {
         self.refilter();
     }
 
+    /// Select the item matching `value`, if present.
+    pub fn select_value(&mut self, value: &str) {
+        if let Some(idx) = self.items.iter().position(|item| item == value) {
+            self.selected_index = idx;
+        }
+    }
+
     /// The confirmed/committed value shown in the filter bar.
     pub fn selected_value(&self) -> Option<&str> {
         self.items.get(self.selected_index).map(|s| s.as_str())

@@ -64,13 +64,17 @@ async fn run(
                             app.severity_filter.open();
                             app.focused = Pane::Severity;
                         }
+                        KeyCode::Char('N') => {
+                            app.limit_filter.open();
+                            app.focused = Pane::Limit;
+                        }
                         KeyCode::Down | KeyCode::Char('j') => app.scroll_down(),
                         KeyCode::Up | KeyCode::Char('k') => app.scroll_up(),
                         _ => {}
                     },
 
                     // --- Filter dropdown focused (typing mode) ---
-                    Pane::Profile | Pane::Application | Pane::Severity => match key.code {
+                    Pane::Profile | Pane::Application | Pane::Severity | Pane::Limit => match key.code {
                         // Uppercase hotkeys always switch pane
                         KeyCode::Char('P') => {
                             app.profile_filter.open();
