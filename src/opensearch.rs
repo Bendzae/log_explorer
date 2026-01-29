@@ -34,6 +34,7 @@ pub struct LogEntry {
 pub struct AvailableFilters {
     pub environments: Vec<String>,
     pub applications: Vec<String>,
+    pub severities: Vec<String>,
 }
 
 async fn create_client() -> Result<OpenSearch> {
@@ -73,6 +74,13 @@ pub async fn fetch_available_filters() -> Result<AvailableFilters> {
                         "size": 20,
                         "order": {"_key": "asc"}
                     }
+                },
+                "severities": {
+                    "terms": {
+                        "field": "severity.keyword",
+                        "size": 20,
+                        "order": {"_key": "asc"}
+                    }
                 }
             }
         }))
@@ -83,10 +91,12 @@ pub async fn fetch_available_filters() -> Result<AvailableFilters> {
 
     let environments = extract_bucket_keys(&body["aggregations"]["profiles"]);
     let applications = extract_bucket_keys(&body["aggregations"]["applications"]);
+    let severities = extract_bucket_keys(&body["aggregations"]["severities"]);
 
     Ok(AvailableFilters {
         environments,
         applications,
+        severities,
     })
 }
 
@@ -102,21 +112,27 @@ fn extract_bucket_keys(agg: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub async fn fetch_logs(application: &str, profile: &str, size: i64) -> Result<Vec<LogEntry>> {
+pub async fn fetch_logs(
+    application: &str,
+    profile: &str,
+    severity: Option<&str>,
+    size: i64,
+) -> Result<Vec<LogEntry>> {
     let client = create_client().await?;
+
+    let mut must = vec![
+        json!({"match": {"application": application}}),
+        json!({"match": {"profiles": profile}}),
+        json!({"range": {"@timestamp": {"gte": "now-24h"}}}),
+    ];
+    if let Some(sev) = severity {
+        must.push(json!({"match": {"severity": sev}}));
+    }
 
     let response = client
         .search(SearchParts::Index(&["logs-*"]))
         .body(json!({
-            "query": {
-                "bool": {
-                    "must": [
-                        {"match": {"application": application}},
-                        {"match": {"profiles": profile}},
-                        {"range": {"@timestamp": {"gte": "now-24h"}}}
-                    ]
-                }
-            },
+            "query": { "bool": { "must": must } },
             "size": size,
             "sort": [{"@timestamp": "desc"}]
         }))

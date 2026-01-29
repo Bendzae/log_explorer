@@ -1,4 +1,5 @@
 use crate::app::{App, Pane};
+use crate::filter_field::FilterField;
 use ratatui::prelude::*;
 use ratatui::widgets::{
     Block, Borders, Cell, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph, Row,
@@ -22,102 +23,134 @@ pub fn render(f: &mut Frame, app: &App) {
     // Render dropdown popup if a filter pane is focused
     match app.focused {
         Pane::Profile => {
-            render_dropdown(f, chunks[0], chunks[1], 0, &app.environments, app.env_index);
+            render_dropdown(f, chunks[0], chunks[1], 0, &app.profile_filter);
         }
         Pane::Application => {
-            render_dropdown(f, chunks[0], chunks[1], 1, &app.applications, app.app_index);
+            render_dropdown(f, chunks[0], chunks[1], 1, &app.app_filter);
+        }
+        Pane::Severity => {
+            render_dropdown(f, chunks[0], chunks[1], 2, &app.severity_filter);
         }
         Pane::Logs => {}
     }
 }
 
+// --- Filter bar (collapsed) ---
+
+const FILTER_CONSTRAINTS: [Constraint; 3] = [
+    Constraint::Length(25),
+    Constraint::Fill(1),
+    Constraint::Length(18),
+];
+
 fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
     let panes = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(25), Constraint::Fill(1)])
+        .constraints(FILTER_CONSTRAINTS)
         .split(area);
 
-    // Profile filter
-    let profile_focused = app.focused == Pane::Profile;
-    let profile_value = app.selected_env().unwrap_or("—");
-    let profile_block = Block::default()
+    render_filter_chip(
+        f,
+        panes[0],
+        "Profile",
+        'P',
+        app.focused == Pane::Profile,
+        app.profile_filter.selected_value().unwrap_or("—"),
+    );
+    render_filter_chip(
+        f,
+        panes[1],
+        "Application",
+        'A',
+        app.focused == Pane::Application,
+        app.app_filter.selected_value().unwrap_or("—"),
+    );
+    render_filter_chip(
+        f,
+        panes[2],
+        "Severity",
+        'S',
+        app.focused == Pane::Severity,
+        app.severity_filter.selected_value().unwrap_or("—"),
+    );
+}
+
+fn render_filter_chip(
+    f: &mut Frame,
+    area: Rect,
+    name: &str,
+    hotkey: char,
+    focused: bool,
+    value: &str,
+) {
+    let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(border_style(profile_focused))
-        .title(filter_title("Profile", 'P', profile_focused));
-    let profile = Paragraph::new(format!(" {}", profile_value)).block(profile_block);
-    f.render_widget(profile, panes[0]);
-
-    // Application filter
-    let app_focused = app.focused == Pane::Application;
-    let app_value = app.selected_app().unwrap_or("—");
-    let app_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(border_style(app_focused))
-        .title(filter_title("Application", 'A', app_focused));
-    let application = Paragraph::new(format!(" {}", app_value)).block(app_block);
-    f.render_widget(application, panes[1]);
+        .border_style(border_style(focused))
+        .title(pane_title(name, hotkey, focused));
+    let widget = Paragraph::new(format!(" {}", value)).block(block);
+    f.render_widget(widget, area);
 }
 
-fn filter_title(name: &str, hotkey: char, focused: bool) -> Line<'static> {
-    let style = if focused {
-        Style::default().fg(Color::Cyan).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let hotkey_style = if focused {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default().fg(Color::Yellow)
-    };
-    Line::from(vec![
-        Span::styled(format!(" {} [", name), style),
-        Span::styled(hotkey.to_string(), hotkey_style),
-        Span::styled("] ", style),
-    ])
-}
-
-fn border_style(focused: bool) -> Style {
-    if focused {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    }
-}
+// --- Filter dropdown popup ---
 
 fn render_dropdown(
     f: &mut Frame,
     filter_area: Rect,
     logs_area: Rect,
     pane_index: u16,
-    items: &[String],
-    selected: usize,
+    field: &FilterField,
 ) {
-    if items.is_empty() {
+    let filtered = field.filtered_items();
+    if filtered.is_empty() && field.filter_text().is_empty() {
         return;
     }
 
-    // Calculate position: dropdown appears below the filter, overlaying the logs area
     let filter_panes = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(25), Constraint::Fill(1)])
+        .constraints(FILTER_CONSTRAINTS)
         .split(filter_area);
 
     let anchor = filter_panes[pane_index as usize];
     let width = anchor.width.max(20);
     let max_height = logs_area.height.saturating_sub(1);
-    let height = (items.len() as u16 + 2).min(max_height).max(3); // +2 for borders
+    // +3 = borders (2) + search input row (1)
+    let height = (filtered.len() as u16 + 3).min(max_height).max(4);
 
-    let popup = Rect::new(anchor.x, logs_area.y, width, height);
+    // Clamp so popup doesn't extend past the right edge of the screen
+    let right_edge = logs_area.x + logs_area.width;
+    let x = anchor.x.min(right_edge.saturating_sub(width));
+    let clamped_width = width.min(right_edge.saturating_sub(x));
 
+    let popup = Rect::new(x, logs_area.y, clamped_width, height);
     f.render_widget(Clear, popup);
 
-    let list_items: Vec<ListItem> = items.iter().map(|i| ListItem::new(i.as_str())).collect();
+    // Split popup: search row + list
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .margin(1)
+        .split(popup);
+
+    // Outer border
+    let border = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    f.render_widget(border, popup);
+
+    // Search input row
+    let search_line = Line::from(vec![
+        Span::styled("> ", Style::default().fg(Color::Yellow)),
+        Span::raw(field.filter_text()),
+        Span::styled("█", Style::default().fg(Color::Cyan)),
+    ]);
+    f.render_widget(Paragraph::new(search_line), inner[0]);
+
+    // Filtered items list
+    let list_items: Vec<ListItem> = filtered
+        .iter()
+        .map(|&i| ListItem::new(i))
+        .collect();
     let list = List::new(list_items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
-        )
         .highlight_style(
             Style::default()
                 .bg(Color::Cyan)
@@ -127,9 +160,11 @@ fn render_dropdown(
         .highlight_symbol("▶ ")
         .highlight_spacing(HighlightSpacing::Always);
 
-    let mut state = ListState::default().with_selected(Some(selected));
-    f.render_stateful_widget(list, popup, &mut state);
+    let mut state = ListState::default().with_selected(Some(field.cursor()));
+    f.render_stateful_widget(list, inner[1], &mut state);
 }
+
+// --- Logs table ---
 
 fn render_logs_table(f: &mut Frame, area: Rect, app: &App) {
     let logs_focused = app.focused == Pane::Logs;
@@ -179,22 +214,6 @@ fn render_logs_table(f: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
-    let title_style = if logs_focused {
-        Style::default().fg(Color::Cyan).bold()
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let hotkey_style = if logs_focused {
-        Style::default().fg(Color::Yellow).bold()
-    } else {
-        Style::default().fg(Color::Yellow)
-    };
-    let title = Line::from(vec![
-        Span::styled(" Logs [", title_style),
-        Span::styled("L", hotkey_style),
-        Span::styled("] ", title_style),
-    ]);
-
     let table = Table::new(
         rows,
         [
@@ -209,7 +228,7 @@ fn render_logs_table(f: &mut Frame, area: Rect, app: &App) {
         Block::default()
             .borders(Borders::ALL)
             .border_style(border_style(logs_focused))
-            .title(title),
+            .title(pane_title("Logs", 'L', logs_focused)),
     )
     .row_highlight_style(Style::default().bg(Color::DarkGray))
     .highlight_symbol("▶ ");
@@ -218,10 +237,17 @@ fn render_logs_table(f: &mut Frame, area: Rect, app: &App) {
     f.render_stateful_widget(table, area, &mut state);
 }
 
+// --- Status bar ---
+
 fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     let mut spans: Vec<Span> = Vec::new();
 
-    for (key, desc) in [("P", "profile"), ("A", "application"), ("L", "logs")] {
+    for (key, desc) in [
+        ("P", "profile"),
+        ("A", "application"),
+        ("S", "severity"),
+        ("L", "logs"),
+    ] {
         spans.push(Span::styled(
             format!(" {} ", key),
             Style::default().fg(Color::Yellow).bold(),
@@ -230,7 +256,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     }
 
     spans.push(Span::styled(
-        " ↑↓/jk ",
+        " ↑↓ ",
         Style::default().fg(Color::Yellow).bold(),
     ));
     spans.push(Span::raw("navigate  "));
@@ -255,4 +281,32 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
 
     let bar = Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::ALL));
     f.render_widget(bar, area);
+}
+
+// --- Shared helpers ---
+
+fn pane_title(name: &str, hotkey: char, focused: bool) -> Line<'static> {
+    let style = if focused {
+        Style::default().fg(Color::Cyan).bold()
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let hotkey_style = if focused {
+        Style::default().fg(Color::Yellow).bold()
+    } else {
+        Style::default().fg(Color::Yellow)
+    };
+    Line::from(vec![
+        Span::styled(format!(" {} [", name), style),
+        Span::styled(hotkey.to_string(), hotkey_style),
+        Span::styled("] ", style),
+    ])
+}
+
+fn border_style(focused: bool) -> Style {
+    if focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    }
 }

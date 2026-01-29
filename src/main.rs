@@ -1,4 +1,5 @@
 mod app;
+mod filter_field;
 mod opensearch;
 mod ui;
 
@@ -47,35 +48,65 @@ async fn run(
 
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') => return Ok(()),
+                match app.focused {
+                    // --- Logs pane focused ---
+                    Pane::Logs => match key.code {
+                        KeyCode::Char('q') => return Ok(()),
+                        KeyCode::Char('P') => {
+                            app.profile_filter.open();
+                            app.focused = Pane::Profile;
+                        }
+                        KeyCode::Char('A') => {
+                            app.app_filter.open();
+                            app.focused = Pane::Application;
+                        }
+                        KeyCode::Char('S') => {
+                            app.severity_filter.open();
+                            app.focused = Pane::Severity;
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => app.scroll_down(),
+                        KeyCode::Up | KeyCode::Char('k') => app.scroll_up(),
+                        _ => {}
+                    },
 
-                    // Pane focus hotkeys (uppercase)
-                    KeyCode::Char('P') => app.focused = Pane::Profile,
-                    KeyCode::Char('A') => app.focused = Pane::Application,
-                    KeyCode::Char('L') => app.focused = Pane::Logs,
+                    // --- Filter dropdown focused (typing mode) ---
+                    Pane::Profile | Pane::Application | Pane::Severity => match key.code {
+                        // Uppercase hotkeys always switch pane
+                        KeyCode::Char('P') => {
+                            app.profile_filter.open();
+                            app.focused = Pane::Profile;
+                        }
+                        KeyCode::Char('A') => {
+                            app.app_filter.open();
+                            app.focused = Pane::Application;
+                        }
+                        KeyCode::Char('S') => {
+                            app.severity_filter.open();
+                            app.focused = Pane::Severity;
+                        }
+                        KeyCode::Char('L') => app.focused = Pane::Logs,
 
-                    // Navigation
-                    KeyCode::Down | KeyCode::Char('j') => app.next(),
-                    KeyCode::Up | KeyCode::Char('k') => app.previous(),
+                        // Any other character -> filter input
+                        KeyCode::Char(c) => {
+                            app.active_filter_mut().type_char(c);
+                        }
+                        KeyCode::Backspace => {
+                            app.active_filter_mut().backspace();
+                        }
 
-                    // Confirm selection in filter dropdown -> fetch logs
-                    KeyCode::Enter => {
-                        if matches!(app.focused, Pane::Profile | Pane::Application) {
+                        KeyCode::Down => app.active_filter_mut().next(),
+                        KeyCode::Up => app.active_filter_mut().previous(),
+
+                        KeyCode::Enter => {
+                            app.active_filter_mut().confirm();
                             app.status = "Fetching logs...".to_string();
                             terminal.draw(|f| ui::render(f, app))?;
                             app.fetch_logs().await;
                         }
-                    }
 
-                    // Dismiss filter dropdown
-                    KeyCode::Esc => {
-                        if matches!(app.focused, Pane::Profile | Pane::Application) {
-                            app.focused = Pane::Logs;
-                        }
-                    }
-
-                    _ => {}
+                        KeyCode::Esc => app.focused = Pane::Logs,
+                        _ => {}
+                    },
                 }
             }
         }
