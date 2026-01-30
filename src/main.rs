@@ -27,6 +27,8 @@ async fn main() -> Result<()> {
     // Show loading state, then fetch filters
     terminal.draw(|f| ui::render(f, &app))?;
     app.load_filters().await;
+    terminal.draw(|f| ui::render(f, &app))?;
+    app.fetch_logs().await;
 
     // Main loop
     let result = run(&mut terminal, &mut app).await;
@@ -64,17 +66,30 @@ async fn run(
                             app.severity_filter.open();
                             app.focused = Pane::Severity;
                         }
+                        KeyCode::Char('T') => {
+                            app.time_filter.open();
+                            app.focused = Pane::TimeRange;
+                        }
                         KeyCode::Char('N') => {
                             app.limit_filter.open();
                             app.focused = Pane::Limit;
                         }
+                        KeyCode::Char('R') => {
+                            app.fetch_page(app.page).await;
+                        }
                         KeyCode::Down | KeyCode::Char('j') => app.scroll_down(),
                         KeyCode::Up | KeyCode::Char('k') => app.scroll_up(),
+                        KeyCode::Right | KeyCode::Char('l') => {
+                            app.next_page().await;
+                        }
+                        KeyCode::Left | KeyCode::Char('h') => {
+                            app.prev_page().await;
+                        }
                         _ => {}
                     },
 
                     // --- Filter dropdown focused (typing mode) ---
-                    Pane::Profile | Pane::Application | Pane::Severity | Pane::Limit => match key.code {
+                    Pane::Profile | Pane::Application | Pane::Severity | Pane::TimeRange | Pane::Limit => match key.code {
                         // Uppercase hotkeys always switch pane
                         KeyCode::Char('P') => {
                             app.profile_filter.open();
@@ -87,6 +102,10 @@ async fn run(
                         KeyCode::Char('S') => {
                             app.severity_filter.open();
                             app.focused = Pane::Severity;
+                        }
+                        KeyCode::Char('T') => {
+                            app.time_filter.open();
+                            app.focused = Pane::TimeRange;
                         }
                         KeyCode::Char('L') => app.focused = Pane::Logs,
 

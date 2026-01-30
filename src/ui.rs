@@ -31,8 +31,11 @@ pub fn render(f: &mut Frame, app: &App) {
         Pane::Severity => {
             render_dropdown(f, chunks[0], chunks[1], 2, &app.severity_filter);
         }
+        Pane::TimeRange => {
+            render_dropdown(f, chunks[0], chunks[1], 3, &app.time_filter);
+        }
         Pane::Limit => {
-            render_dropdown(f, chunks[0], chunks[1], 3, &app.limit_filter);
+            render_dropdown(f, chunks[0], chunks[1], 4, &app.limit_filter);
         }
         Pane::Logs => {}
     }
@@ -40,10 +43,11 @@ pub fn render(f: &mut Frame, app: &App) {
 
 // --- Filter bar (collapsed) ---
 
-const FILTER_CONSTRAINTS: [Constraint; 4] = [
+const FILTER_CONSTRAINTS: [Constraint; 5] = [
     Constraint::Length(25),
     Constraint::Fill(1),
     Constraint::Length(18),
+    Constraint::Length(20),
     Constraint::Length(16),
 ];
 
@@ -80,6 +84,14 @@ fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
     render_filter_chip(
         f,
         panes[3],
+        "Time Range",
+        'T',
+        app.focused == Pane::TimeRange,
+        app.time_filter.selected_value().unwrap_or("—"),
+    );
+    render_filter_chip(
+        f,
+        panes[4],
         "Limit",
         'N',
         app.focused == Pane::Limit,
@@ -258,6 +270,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         ("P", "profile"),
         ("A", "application"),
         ("S", "severity"),
+        ("T", "time"),
         ("N", "limit"),
         ("L", "logs"),
     ] {
@@ -268,34 +281,34 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::raw(format!("{}  ", desc)));
     }
 
-    spans.push(Span::styled(
-        " ↑↓ ",
-        Style::default().fg(Color::Yellow).bold(),
-    ));
-    spans.push(Span::raw("navigate  "));
-    spans.push(Span::styled(
-        " Enter ",
-        Style::default().fg(Color::Yellow).bold(),
-    ));
-    spans.push(Span::raw("select  "));
-    spans.push(Span::styled(
-        " Esc ",
-        Style::default().fg(Color::Yellow).bold(),
-    ));
-    spans.push(Span::raw("back  "));
-    spans.push(Span::styled(
-        " q ",
-        Style::default().fg(Color::Yellow).bold(),
-    ));
-    spans.push(Span::raw("quit  "));
+    for (key, desc) in [
+        ("↑↓/jk", "navigate"),
+        ("←→/hl", "page"),
+        ("R", "refresh"),
+        ("Enter", "select"),
+        ("Esc", "back"),
+        ("q", "quit"),
+    ] {
+        spans.push(Span::styled(
+            format!(" {} ", key),
+            Style::default().fg(Color::Yellow).bold(),
+        ));
+        spans.push(Span::raw(format!("{}  ", desc)));
+    }
 
     spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
     spans.push(Span::raw(&app.status));
 
-    let position = if app.logs.is_empty() {
+    let position = if app.total_hits == 0 {
         " 0/0 ".to_string()
     } else {
-        format!(" {}/{} ", app.logs.len(), app.total_hits)
+        format!(
+            " Page {}/{} ({}/{}) ",
+            app.page,
+            app.total_pages(),
+            app.logs.len(),
+            app.total_hits
+        )
     };
 
     let bar = Paragraph::new(Line::from(spans)).block(

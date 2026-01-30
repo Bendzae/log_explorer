@@ -118,18 +118,22 @@ pub struct LogResult {
 }
 
 pub async fn fetch_logs(
-    application: &str,
+    application: Option<&str>,
     profile: &str,
     severity: Option<&str>,
+    time_range: &str,
     size: i64,
+    from: i64,
 ) -> Result<LogResult> {
     let client = create_client().await?;
 
     let mut must = vec![
-        json!({"match": {"application": application}}),
         json!({"match": {"profiles": profile}}),
-        json!({"range": {"@timestamp": {"gte": "now-24h"}}}),
+        json!({"range": {"@timestamp": {"gte": time_range}}}),
     ];
+    if let Some(app) = application {
+        must.push(json!({"match": {"application": app}}));
+    }
     if let Some(sev) = severity {
         must.push(json!({"match": {"severity": sev}}));
     }
@@ -138,6 +142,7 @@ pub async fn fetch_logs(
         .search(SearchParts::Index(&["logs-*"]))
         .body(json!({
             "query": { "bool": { "must": must } },
+            "from": from,
             "size": size,
             "sort": [{"@timestamp": "desc"}],
             "track_total_hits": true

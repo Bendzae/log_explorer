@@ -8,6 +8,7 @@ pub enum Pane {
     Profile,
     Application,
     Severity,
+    TimeRange,
     Limit,
     Logs,
 }
@@ -18,11 +19,13 @@ pub struct App {
     pub profile_filter: FilterField,
     pub app_filter: FilterField,
     pub severity_filter: FilterField,
+    pub time_filter: FilterField,
     pub limit_filter: FilterField,
 
     pub logs: Vec<LogEntry>,
     pub log_index: usize,
     pub total_hits: u64,
+    pub page: u64,
 
     pub status: String,
 }
@@ -34,10 +37,12 @@ impl App {
             profile_filter: FilterField::new(),
             app_filter: FilterField::new(),
             severity_filter: FilterField::new(),
+            time_filter: FilterField::new(),
             limit_filter: FilterField::new(),
             logs: Vec::new(),
             log_index: 0,
             total_hits: 0,
+            page: 1,
             status: "Loading filters...".to_string(),
         }
     }
@@ -47,13 +52,33 @@ impl App {
     }
 
     pub fn selected_app(&self) -> Option<&str> {
-        self.app_filter.selected_value()
+        self.app_filter.selected_value().filter(|v| *v != ALL)
     }
 
     pub fn selected_severity(&self) -> Option<&str> {
         self.severity_filter
             .selected_value()
             .filter(|v| *v != ALL)
+    }
+
+    pub fn selected_time_range(&self) -> &str {
+        self.time_filter
+            .selected_value()
+            .map(|v| match v {
+                "1m" => "now-1m",
+                "5m" => "now-5m",
+                "15m" => "now-15m",
+                "30m" => "now-30m",
+                "1h" => "now-1h",
+                "3h" => "now-3h",
+                "6h" => "now-6h",
+                "12h" => "now-12h",
+                "24h" => "now-24h",
+                "3d" => "now-3d",
+                "7d" => "now-7d",
+                _ => "now-5m",
+            })
+            .unwrap_or("now-5m")
     }
 
     pub fn selected_limit(&self) -> i64 {
@@ -63,11 +88,20 @@ impl App {
             .unwrap_or(100)
     }
 
+    pub fn total_pages(&self) -> u64 {
+        let limit = self.selected_limit() as u64;
+        if limit == 0 {
+            return 1;
+        }
+        self.total_hits.div_ceil(limit).max(1)
+    }
+
     pub fn active_filter_mut(&mut self) -> &mut FilterField {
         match self.focused {
             Pane::Profile => &mut self.profile_filter,
             Pane::Application => &mut self.app_filter,
             Pane::Severity => &mut self.severity_filter,
+            Pane::TimeRange => &mut self.time_filter,
             Pane::Limit => &mut self.limit_filter,
             Pane::Logs => unreachable!("active_filter_mut called while Logs is focused"),
         }
@@ -83,18 +117,30 @@ impl App {
                     filters.applications.len()
                 );
                 self.profile_filter.set_items(filters.environments);
-                self.app_filter.set_items(filters.applications);
+                self.profile_filter.select_value("production");
+
+                let mut applications = vec![ALL.to_string()];
+                applications.extend(filters.applications);
+                self.app_filter.set_items(applications);
 
                 let mut severities = vec![ALL.to_string()];
                 severities.extend(filters.severities);
                 self.severity_filter.set_items(severities);
+
+                let time_ranges: Vec<String> =
+                    ["1m", "5m", "15m", "30m", "1h", "3h", "6h", "12h", "24h", "3d", "7d"]
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect();
+                self.time_filter.set_items(time_ranges);
+                self.time_filter.select_value("5m");
 
                 let limits: Vec<String> = ["50", "100", "200", "500", "1000"]
                     .iter()
                     .map(|s| s.to_string())
                     .collect();
                 self.limit_filter.set_items(limits);
-                self.limit_filter.select_value("100");
+                self.limit_filter.select_value("50");
             }
             Err(e) => {
                 self.status = format!("Error loading filters: {}", e);
@@ -103,25 +149,31 @@ impl App {
     }
 
     pub async fn fetch_logs(&mut self) {
+        self.fetch_page(1).await;
+    }
+
+    pub async fn fetch_page(&mut self, page: u64) {
         let Some(env) = self.selected_env().map(str::to_owned) else {
             self.status = "No environment selected".to_string();
             return;
         };
-        let Some(app) = self.selected_app().map(str::to_owned) else {
-            self.status = "No application selected".to_string();
-            return;
-        };
+        let app = self.selected_app().map(str::to_owned);
         let severity = self.selected_severity().map(str::to_owned);
-        let label = match &severity {
-            Some(sev) => format!("{} ({}) [{}]", app, env, sev),
-            None => format!("{} ({})", app, env),
-        };
-        self.status = format!("Fetching logs from {}...", label);
+        let time_range = self.selected_time_range().to_owned();
         let limit = self.selected_limit();
-        match opensearch::fetch_logs(&app, &env, severity.as_deref(), limit).await {
+        let from = (page - 1) as i64 * limit;
+        let app_label = app.as_deref().unwrap_or("ALL");
+        let label = match &severity {
+            Some(sev) => format!("{} ({}) [{}]", app_label, env, sev),
+            None => format!("{} ({})", app_label, env),
+        };
+        self.status = format!("Fetching page {} from {}...", page, label);
+        match opensearch::fetch_logs(app.as_deref(), &env, severity.as_deref(), &time_range, limit, from).await
+        {
             Ok(result) => {
                 self.status = format!("Loaded {} logs from {}", result.logs.len(), label);
                 self.total_hits = result.total;
+                self.page = page;
                 self.logs = result.logs;
                 self.log_index = 0;
                 self.focused = Pane::Logs;
@@ -129,6 +181,18 @@ impl App {
             Err(e) => {
                 self.status = format!("Error: {}", e);
             }
+        }
+    }
+
+    pub async fn next_page(&mut self) {
+        if self.page < self.total_pages() {
+            self.fetch_page(self.page + 1).await;
+        }
+    }
+
+    pub async fn prev_page(&mut self) {
+        if self.page > 1 {
+            self.fetch_page(self.page - 1).await;
         }
     }
 
