@@ -11,7 +11,10 @@ pub enum Pane {
     TimeRange,
     Limit,
     Logs,
+    LogContext,
 }
+
+pub const CONTEXT_MENU_OPTIONS: &[&str] = &["Copy to clipboard", "Open in editor"];
 
 pub struct App {
     pub focused: Pane,
@@ -26,6 +29,7 @@ pub struct App {
     pub log_index: usize,
     pub total_hits: u64,
     pub page: u64,
+    pub context_cursor: usize,
 
     pub status: String,
 }
@@ -43,6 +47,7 @@ impl App {
             log_index: 0,
             total_hits: 0,
             page: 1,
+            context_cursor: 0,
             status: "Loading filters...".to_string(),
         }
     }
@@ -103,7 +108,7 @@ impl App {
             Pane::Severity => &mut self.severity_filter,
             Pane::TimeRange => &mut self.time_filter,
             Pane::Limit => &mut self.limit_filter,
-            Pane::Logs => unreachable!("active_filter_mut called while Logs is focused"),
+            Pane::Logs | Pane::LogContext => unreachable!("active_filter_mut called while Logs/LogContext is focused"),
         }
     }
 
@@ -116,11 +121,17 @@ impl App {
                     filters.environments.len(),
                     filters.applications.len()
                 );
-                self.profile_filter.set_items(filters.environments);
+                let environments: Vec<String> = filters.environments.into_iter()
+                    .filter(|e| e != "ACTIVE_PROFILE_IS_UNDEFINED")
+                    .collect();
+                self.profile_filter.set_items(environments);
                 self.profile_filter.select_value("production");
 
                 let mut applications = vec![ALL.to_string()];
-                applications.extend(filters.applications);
+                applications.extend(
+                    filters.applications.into_iter()
+                        .filter(|a| a != "APPLICATION_NAME_IS_UNDEFINED"),
+                );
                 self.app_filter.set_items(applications);
 
                 let mut severities = vec![ALL.to_string()];

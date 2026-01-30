@@ -4,7 +4,8 @@ mod opensearch;
 mod ui;
 
 use anyhow::Result;
-use app::{App, Pane};
+use app::{App, Pane, CONTEXT_MENU_OPTIONS};
+use arboard::Clipboard;
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -12,6 +13,7 @@ use crossterm::terminal::{
 };
 use ratatui::prelude::*;
 use std::io;
+use std::process::Command;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -39,6 +41,31 @@ async fn main() -> Result<()> {
     terminal.show_cursor()?;
 
     result
+}
+
+fn open_in_editor(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    content: &str,
+    filename: &str,
+) -> Result<String> {
+    let tmp = std::env::temp_dir().join(filename);
+    std::fs::write(&tmp, content)?;
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "open".to_string());
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+
+    let result = Command::new(&editor).arg(&tmp).status();
+
+    enable_raw_mode()?;
+    execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+    terminal.clear()?;
+
+    match result {
+        Ok(s) if s.success() => Ok("Editor closed".to_string()),
+        Ok(s) => Ok(format!("Editor exited: {}", s)),
+        Err(e) => Ok(format!("Failed to open editor: {}", e)),
+    }
 }
 
 async fn run(
@@ -84,6 +111,52 @@ async fn run(
                         }
                         KeyCode::Left | KeyCode::Char('h') => {
                             app.prev_page().await;
+                        }
+                        KeyCode::Enter => {
+                            if !app.logs.is_empty() {
+                                app.context_cursor = 0;
+                                app.focused = Pane::LogContext;
+                            }
+                        }
+                        KeyCode::Char('E') => {
+                            if !app.logs.is_empty() {
+                                let content: String = app.logs.iter().map(|log| {
+                                    format!("[{}] {} [{}] {}", log.timestamp, log.severity, log.logger, log.message)
+                                }).collect::<Vec<_>>().join("\n");
+                                app.status = open_in_editor(terminal, &content, "log_explorer_page.log")?;
+                            }
+                        }
+                        _ => {}
+                    },
+
+                    // --- Log context menu ---
+                    Pane::LogContext => match key.code {
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            app.context_cursor = (app.context_cursor + 1)
+                                .min(CONTEXT_MENU_OPTIONS.len() - 1);
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            app.context_cursor = app.context_cursor.saturating_sub(1);
+                        }
+                        KeyCode::Enter => {
+                            if let Some(log) = app.logs.get(app.log_index) {
+                                match app.context_cursor {
+                                    0 => {
+                                        match Clipboard::new().and_then(|mut cb| cb.set_text(log.message.clone())) {
+                                            Ok(_) => app.status = "Copied to clipboard".to_string(),
+                                            Err(e) => app.status = format!("Clipboard error: {}", e),
+                                        }
+                                    }
+                                    1 => {
+                                        app.status = open_in_editor(terminal, &log.message, "log_explorer_entry.log")?;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            app.focused = Pane::Logs;
+                        }
+                        KeyCode::Esc => {
+                            app.focused = Pane::Logs;
                         }
                         _ => {}
                     },

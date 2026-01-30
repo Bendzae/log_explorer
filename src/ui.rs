@@ -1,4 +1,4 @@
-use crate::app::{App, Pane};
+use crate::app::{App, Pane, CONTEXT_MENU_OPTIONS};
 use crate::filter_field::FilterField;
 use ratatui::prelude::*;
 use ratatui::widgets::{
@@ -38,6 +38,9 @@ pub fn render(f: &mut Frame, app: &App) {
             render_dropdown(f, chunks[0], chunks[1], 4, &app.limit_filter);
         }
         Pane::Logs => {}
+        Pane::LogContext => {
+            render_log_context_menu(f, chunks[1], app);
+        }
     }
 }
 
@@ -317,6 +320,43 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
             .title(Line::from(position).right_aligned()),
     );
     f.render_widget(bar, area);
+}
+
+// --- Log context menu popup ---
+
+fn render_log_context_menu(f: &mut Frame, logs_area: Rect, app: &App) {
+    let width = 24_u16;
+    let height = (CONTEXT_MENU_OPTIONS.len() as u16 + 2).min(logs_area.height);
+
+    let x = logs_area.x + (logs_area.width.saturating_sub(width)) / 2;
+    let y = logs_area.y + (logs_area.height.saturating_sub(height)) / 2;
+
+    let popup = Rect::new(x, y, width, height);
+    f.render_widget(Clear, popup);
+
+    let items: Vec<ListItem> = CONTEXT_MENU_OPTIONS
+        .iter()
+        .map(|&opt| ListItem::new(opt))
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .title(" Actions "),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(Color::Cyan)
+                .fg(Color::Black)
+                .bold(),
+        )
+        .highlight_symbol("▶ ")
+        .highlight_spacing(HighlightSpacing::Always);
+
+    let mut state = ListState::default().with_selected(Some(app.context_cursor));
+    f.render_stateful_widget(list, popup, &mut state);
 }
 
 // --- Shared helpers ---
