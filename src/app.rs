@@ -1,3 +1,4 @@
+use crate::config::AppConfig;
 use crate::filter_field::FilterField;
 use crate::opensearch::{self, LogEntry};
 
@@ -19,6 +20,7 @@ pub enum Pane {
 pub const CONTEXT_MENU_OPTIONS: &[&str] = &["Copy to clipboard", "Open in editor"];
 
 pub struct App {
+    pub config: AppConfig,
     pub focused: Pane,
 
     pub profile_filter: FilterField,
@@ -39,8 +41,9 @@ pub struct App {
 }
 
 impl App {
-    pub fn new() -> Self {
+    pub fn new(config: AppConfig) -> Self {
         Self {
+            config,
             focused: Pane::Logs,
             profile_filter: FilterField::new(),
             app_filter: FilterField::new(),
@@ -129,7 +132,7 @@ impl App {
 
     pub async fn load_filters(&mut self) {
         self.status = "Fetching available filters...".to_string();
-        match opensearch::fetch_available_filters().await {
+        match opensearch::fetch_available_filters(&self.config.endpoint_url, &self.config.aws_region).await {
             Ok(filters) => {
                 self.status = format!(
                     "{} environments, {} applications — select filters and press Enter",
@@ -196,7 +199,7 @@ impl App {
         let search = if self.search_text.is_empty() { None } else { Some(self.search_text.as_str()) };
         let search_exact = self.search_exact();
         self.status = format!("Fetching page {} from {}...", page, label);
-        match opensearch::fetch_logs(app.as_deref(), &env, severity.as_deref(), &time_range, search, search_exact, limit, from).await
+        match opensearch::fetch_logs(&self.config.endpoint_url, &self.config.aws_region, app.as_deref(), &env, severity.as_deref(), &time_range, search, search_exact, limit, from).await
         {
             Ok(result) => {
                 self.status = format!("Loaded {} logs from {}", result.logs.len(), label);

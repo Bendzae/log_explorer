@@ -1,4 +1,5 @@
 mod app;
+mod config;
 mod filter_field;
 mod opensearch;
 mod ui;
@@ -6,18 +7,36 @@ mod ui;
 use anyhow::Result;
 use app::{App, Pane, CONTEXT_MENU_OPTIONS};
 use arboard::Clipboard;
+use config::AppConfig;
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use std::io;
 use std::process::Command;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut app = App::new();
+    let config = match config::load_config() {
+        Ok(Some(cfg)) => cfg,
+        Ok(None) => {
+            match run_setup_dialog(None)? {
+                Some(cfg) => cfg,
+                None => return Ok(()),
+            }
+        }
+        Err(e) => {
+            match run_setup_dialog(Some(&format!("Config error: {}", e)))? {
+                Some(cfg) => cfg,
+                None => return Ok(()),
+            }
+        }
+    };
+
+    let mut app = App::new(config);
 
     // Setup terminal
     enable_raw_mode()?;
@@ -41,6 +60,177 @@ async fn main() -> Result<()> {
     terminal.show_cursor()?;
 
     result
+}
+
+struct SetupState {
+    url: String,
+    region: String,
+    active_field: usize, // 0 = URL, 1 = Region
+    error_message: Option<String>,
+}
+
+fn run_setup_dialog(error: Option<&str>) -> Result<Option<AppConfig>> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut state = SetupState {
+        url: String::new(),
+        region: "eu-central-1".to_string(),
+        active_field: 0,
+        error_message: error.map(String::from),
+    };
+
+    let result = loop {
+        terminal.draw(|f| render_setup_dialog(f, &state))?;
+
+        if event::poll(std::time::Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Tab | KeyCode::Down => {
+                        state.active_field = (state.active_field + 1) % 2;
+                    }
+                    KeyCode::BackTab | KeyCode::Up => {
+                        state.active_field = if state.active_field == 0 { 1 } else { 0 };
+                    }
+                    KeyCode::Char(c) => {
+                        match state.active_field {
+                            0 => state.url.push(c),
+                            _ => state.region.push(c),
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        match state.active_field {
+                            0 => { state.url.pop(); }
+                            _ => { state.region.pop(); }
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if !state.url.is_empty() {
+                            let cfg = AppConfig {
+                                endpoint_url: state.url.clone(),
+                                aws_region: if state.region.is_empty() {
+                                    "eu-central-1".to_string()
+                                } else {
+                                    state.region.clone()
+                                },
+                            };
+                            if let Err(e) = config::save_config(&cfg) {
+                                state.error_message = Some(format!("Failed to save config: {}", e));
+                            } else {
+                                break Some(cfg);
+                            }
+                        }
+                    }
+                    KeyCode::Esc => {
+                        break None;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    };
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+
+    Ok(result)
+}
+
+fn render_setup_dialog(f: &mut Frame, state: &SetupState) {
+    // Dark background
+    f.render_widget(Block::default().style(Style::default().bg(Color::Black)), f.area());
+
+    let area = f.area();
+    let width = 60_u16.min(area.width.saturating_sub(4));
+    let height = 14_u16.min(area.height.saturating_sub(2));
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup = Rect::new(x, y, width, height);
+
+    f.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Log Explorer Setup ");
+    f.render_widget(block, popup);
+
+    let inner = Rect::new(popup.x + 2, popup.y + 1, popup.width.saturating_sub(4), popup.height.saturating_sub(2));
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    if let Some(ref err) = state.error_message {
+        lines.push(Line::from(Span::styled(err.as_str(), Style::default().fg(Color::Red))));
+        lines.push(Line::from(""));
+    }
+
+    // URL field
+    let url_label_style = if state.active_field == 0 {
+        Style::default().fg(Color::Cyan).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+    lines.push(Line::from(Span::styled("OpenSearch Endpoint URL:", url_label_style)));
+
+    let url_line = if state.active_field == 0 {
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::Yellow)),
+            Span::raw(&state.url),
+            Span::styled("█", Style::default().fg(Color::Cyan)),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::raw(&state.url),
+        ])
+    };
+    lines.push(url_line);
+    lines.push(Line::from(""));
+
+    // Region field
+    let region_label_style = if state.active_field == 1 {
+        Style::default().fg(Color::Cyan).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+    lines.push(Line::from(Span::styled("AWS Region:", region_label_style)));
+
+    let region_line = if state.active_field == 1 {
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::Yellow)),
+            Span::raw(&state.region),
+            Span::styled("█", Style::default().fg(Color::Cyan)),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::raw(&state.region),
+        ])
+    };
+    lines.push(region_line);
+    lines.push(Line::from(""));
+
+    // Help text
+    lines.push(Line::from(vec![
+        Span::styled(" Tab ", Style::default().fg(Color::Yellow).bold()),
+        Span::raw("switch field  "),
+        Span::styled(" Enter ", Style::default().fg(Color::Yellow).bold()),
+        Span::raw("confirm  "),
+        Span::styled(" Esc ", Style::default().fg(Color::Yellow).bold()),
+        Span::raw("quit"),
+    ]));
+
+    let config_path = config::config_path();
+    lines.push(Line::from(Span::styled(
+        format!("Config: {}", config_path.display()),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn open_in_editor(

@@ -5,9 +5,6 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use url::Url;
 
-const OPENSEARCH_URL: &str =
-    "https://vpc-es-closelink-logs-ieziw6d36bxeyvrdgezcchssdi.eu-central-1.es.amazonaws.com";
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct LogEntry {
     #[serde(rename = "@timestamp")]
@@ -37,11 +34,11 @@ pub struct AvailableFilters {
     pub severities: Vec<String>,
 }
 
-async fn create_client() -> Result<OpenSearch> {
-    let url = Url::parse(OPENSEARCH_URL)?;
+async fn create_client(endpoint_url: &str, aws_region: &str) -> Result<OpenSearch> {
+    let url = Url::parse(endpoint_url)?;
     let conn_pool = SingleNodeConnectionPool::new(url);
     let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .region(aws_config::Region::new("eu-central-1"))
+        .region(aws_config::Region::new(aws_region.to_string()))
         .load()
         .await;
     let transport = TransportBuilder::new(conn_pool)
@@ -50,8 +47,8 @@ async fn create_client() -> Result<OpenSearch> {
     Ok(OpenSearch::new(transport))
 }
 
-pub async fn fetch_available_filters() -> Result<AvailableFilters> {
-    let client = create_client().await?;
+pub async fn fetch_available_filters(endpoint_url: &str, aws_region: &str) -> Result<AvailableFilters> {
+    let client = create_client(endpoint_url, aws_region).await?;
 
     let response = client
         .search(SearchParts::Index(&["logs-*"]))
@@ -118,6 +115,8 @@ pub struct LogResult {
 }
 
 pub async fn fetch_logs(
+    endpoint_url: &str,
+    aws_region: &str,
     application: Option<&str>,
     profile: &str,
     severity: Option<&str>,
@@ -127,7 +126,7 @@ pub async fn fetch_logs(
     size: i64,
     from: i64,
 ) -> Result<LogResult> {
-    let client = create_client().await?;
+    let client = create_client(endpoint_url, aws_region).await?;
 
     let mut must = vec![
         json!({"match": {"profiles": profile}}),
