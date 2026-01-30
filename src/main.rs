@@ -118,6 +118,13 @@ async fn run(
                                 app.focused = Pane::LogContext;
                             }
                         }
+                        KeyCode::Char('/') => {
+                            app.focused = Pane::Search;
+                        }
+                        KeyCode::Char('M') => {
+                            app.search_mode_filter.open();
+                            app.focused = Pane::SearchMode;
+                        }
                         KeyCode::Char('E') => {
                             if !app.logs.is_empty() {
                                 let content: String = app.logs.iter().map(|log| {
@@ -161,8 +168,27 @@ async fn run(
                         _ => {}
                     },
 
+                    // --- Search text input ---
+                    Pane::Search => match key.code {
+                        KeyCode::Char(c) => {
+                            app.search_text.push(c);
+                        }
+                        KeyCode::Backspace => {
+                            app.search_text.pop();
+                        }
+                        KeyCode::Enter => {
+                            app.status = "Fetching logs...".to_string();
+                            terminal.draw(|f| ui::render(f, app))?;
+                            app.fetch_logs().await;
+                        }
+                        KeyCode::Esc => {
+                            app.focused = Pane::Logs;
+                        }
+                        _ => {}
+                    },
+
                     // --- Filter dropdown focused (typing mode) ---
-                    Pane::Profile | Pane::Application | Pane::Severity | Pane::TimeRange | Pane::Limit => match key.code {
+                    Pane::Profile | Pane::Application | Pane::Severity | Pane::TimeRange | Pane::Limit | Pane::SearchMode => match key.code {
                         // Uppercase hotkeys always switch pane
                         KeyCode::Char('P') => {
                             app.profile_filter.open();
@@ -181,6 +207,11 @@ async fn run(
                             app.focused = Pane::TimeRange;
                         }
                         KeyCode::Char('L') => app.focused = Pane::Logs,
+                        KeyCode::Char('/') => app.focused = Pane::Search,
+                        KeyCode::Char('M') => {
+                            app.search_mode_filter.open();
+                            app.focused = Pane::SearchMode;
+                        }
 
                         // Any other character -> filter input
                         KeyCode::Char(c) => {
@@ -194,10 +225,15 @@ async fn run(
                         KeyCode::Up => app.active_filter_mut().previous(),
 
                         KeyCode::Enter => {
+                            let pane = app.focused;
                             app.active_filter_mut().confirm();
-                            app.status = "Fetching logs...".to_string();
-                            terminal.draw(|f| ui::render(f, app))?;
-                            app.fetch_logs().await;
+                            if pane == Pane::SearchMode {
+                                app.focused = Pane::Logs;
+                            } else {
+                                app.status = "Fetching logs...".to_string();
+                                terminal.draw(|f| ui::render(f, app))?;
+                                app.fetch_logs().await;
+                            }
                         }
 
                         KeyCode::Esc => app.focused = Pane::Logs,

@@ -10,6 +10,8 @@ pub enum Pane {
     Severity,
     TimeRange,
     Limit,
+    Search,
+    SearchMode,
     Logs,
     LogContext,
 }
@@ -24,6 +26,8 @@ pub struct App {
     pub severity_filter: FilterField,
     pub time_filter: FilterField,
     pub limit_filter: FilterField,
+    pub search_text: String,
+    pub search_mode_filter: FilterField,
 
     pub logs: Vec<LogEntry>,
     pub log_index: usize,
@@ -43,6 +47,12 @@ impl App {
             severity_filter: FilterField::new(),
             time_filter: FilterField::new(),
             limit_filter: FilterField::new(),
+            search_text: String::new(),
+            search_mode_filter: {
+                let mut f = FilterField::new();
+                f.set_items(vec!["Each word".to_string(), "Exact".to_string()]);
+                f
+            },
             logs: Vec::new(),
             log_index: 0,
             total_hits: 0,
@@ -93,6 +103,10 @@ impl App {
             .unwrap_or(100)
     }
 
+    pub fn search_exact(&self) -> bool {
+        self.search_mode_filter.selected_value() == Some("Exact")
+    }
+
     pub fn total_pages(&self) -> u64 {
         let limit = self.selected_limit() as u64;
         if limit == 0 {
@@ -108,7 +122,8 @@ impl App {
             Pane::Severity => &mut self.severity_filter,
             Pane::TimeRange => &mut self.time_filter,
             Pane::Limit => &mut self.limit_filter,
-            Pane::Logs | Pane::LogContext => unreachable!("active_filter_mut called while Logs/LogContext is focused"),
+            Pane::SearchMode => &mut self.search_mode_filter,
+            Pane::Search | Pane::Logs | Pane::LogContext => unreachable!("active_filter_mut called while Search/Logs/LogContext is focused"),
         }
     }
 
@@ -178,8 +193,10 @@ impl App {
             Some(sev) => format!("{} ({}) [{}]", app_label, env, sev),
             None => format!("{} ({})", app_label, env),
         };
+        let search = if self.search_text.is_empty() { None } else { Some(self.search_text.as_str()) };
+        let search_exact = self.search_exact();
         self.status = format!("Fetching page {} from {}...", page, label);
-        match opensearch::fetch_logs(app.as_deref(), &env, severity.as_deref(), &time_range, limit, from).await
+        match opensearch::fetch_logs(app.as_deref(), &env, severity.as_deref(), &time_range, search, search_exact, limit, from).await
         {
             Ok(result) => {
                 self.status = format!("Loaded {} logs from {}", result.logs.len(), label);

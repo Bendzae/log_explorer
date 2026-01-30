@@ -37,7 +37,10 @@ pub fn render(f: &mut Frame, app: &App) {
         Pane::Limit => {
             render_dropdown(f, chunks[0], chunks[1], 4, &app.limit_filter);
         }
-        Pane::Logs => {}
+        Pane::SearchMode => {
+            render_dropdown(f, chunks[0], chunks[1], 6, &app.search_mode_filter);
+        }
+        Pane::Search | Pane::Logs => {}
         Pane::LogContext => {
             render_log_context_menu(f, chunks[1], app);
         }
@@ -46,12 +49,14 @@ pub fn render(f: &mut Frame, app: &App) {
 
 // --- Filter bar (collapsed) ---
 
-const FILTER_CONSTRAINTS: [Constraint; 5] = [
+const FILTER_CONSTRAINTS: [Constraint; 7] = [
     Constraint::Length(25),
-    Constraint::Fill(1),
+    Constraint::Length(30),
     Constraint::Length(18),
     Constraint::Length(20),
     Constraint::Length(16),
+    Constraint::Fill(1),
+    Constraint::Length(18),
 ];
 
 fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
@@ -100,6 +105,15 @@ fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
         app.focused == Pane::Limit,
         app.limit_filter.selected_value().unwrap_or("—"),
     );
+    render_search_chip(f, panes[5], app);
+    render_filter_chip(
+        f,
+        panes[6],
+        "Mode",
+        'M',
+        app.focused == Pane::SearchMode,
+        app.search_mode_filter.selected_value().unwrap_or("—"),
+    );
 }
 
 fn render_filter_chip(
@@ -116,6 +130,27 @@ fn render_filter_chip(
         .title(pane_title(name, hotkey, focused));
     let widget = Paragraph::new(format!(" {}", value)).block(block);
     f.render_widget(widget, area);
+}
+
+fn render_search_chip(f: &mut Frame, area: Rect, app: &App) {
+    let focused = app.focused == Pane::Search;
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style(focused))
+        .title(pane_title("Search", '/', focused));
+
+    let content = if focused {
+        Line::from(vec![
+            Span::raw(format!(" {}", app.search_text)),
+            Span::styled("█", Style::default().fg(Color::Cyan)),
+        ])
+    } else if app.search_text.is_empty() {
+        Line::from(Span::styled(" —", Style::default().fg(Color::DarkGray)))
+    } else {
+        Line::from(format!(" {}", app.search_text))
+    };
+
+    f.render_widget(Paragraph::new(content).block(block), area);
 }
 
 // --- Filter dropdown popup ---
@@ -232,11 +267,13 @@ fn render_logs_table(f: &mut Frame, area: Rect, app: &App) {
                 })
                 .unwrap_or_else(|| log.timestamp.clone());
 
+            let message_cell = Cell::from(highlight_matches(&log.message, &app.search_text));
+
             Row::new(vec![
                 Cell::from(time),
                 Cell::from(log.severity.clone()).style(severity_style),
                 Cell::from(short_logger.to_string()),
-                Cell::from(log.message.clone()),
+                message_cell,
             ])
         })
         .collect();
@@ -357,6 +394,38 @@ fn render_log_context_menu(f: &mut Frame, logs_area: Rect, app: &App) {
 
     let mut state = ListState::default().with_selected(Some(app.context_cursor));
     f.render_stateful_widget(list, popup, &mut state);
+}
+
+// --- Text highlighting ---
+
+fn highlight_matches<'a>(text: &'a str, query: &str) -> Line<'a> {
+    if query.is_empty() {
+        return Line::from(text);
+    }
+
+    let lower_text = text.to_lowercase();
+    let lower_query = query.to_lowercase();
+    let highlight = Style::default().fg(Color::Black).bg(Color::Yellow).bold();
+
+    let mut spans = Vec::new();
+    let mut pos = 0;
+
+    while let Some(match_start) = lower_text[pos..].find(&lower_query) {
+        let abs_start = pos + match_start;
+        let abs_end = abs_start + query.len();
+
+        if abs_start > pos {
+            spans.push(Span::raw(&text[pos..abs_start]));
+        }
+        spans.push(Span::styled(&text[abs_start..abs_end], highlight));
+        pos = abs_end;
+    }
+
+    if pos < text.len() {
+        spans.push(Span::raw(&text[pos..]));
+    }
+
+    Line::from(spans)
 }
 
 // --- Shared helpers ---

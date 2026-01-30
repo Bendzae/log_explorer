@@ -122,6 +122,8 @@ pub async fn fetch_logs(
     profile: &str,
     severity: Option<&str>,
     time_range: &str,
+    search: Option<&str>,
+    search_exact: bool,
     size: i64,
     from: i64,
 ) -> Result<LogResult> {
@@ -136,6 +138,13 @@ pub async fn fetch_logs(
     }
     if let Some(sev) = severity {
         must.push(json!({"match": {"severity": sev}}));
+    }
+    if let Some(q) = search {
+        if search_exact {
+            must.push(json!({"match_phrase": {"message": q}}));
+        } else {
+            must.push(json!({"query_string": {"default_field": "message", "query": format!("*{}*", q)}}));
+        }
     }
 
     let response = client
