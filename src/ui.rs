@@ -236,6 +236,7 @@ fn render_logs_table(f: &mut Frame, area: Rect, app: &App) {
         Cell::from("Level").style(Style::default().bold()),
         Cell::from("Logger").style(Style::default().bold()),
         Cell::from("Message").style(Style::default().bold()),
+        Cell::from("ST").style(Style::default().bold()),
     ])
     .height(1)
     .bottom_margin(1);
@@ -269,11 +270,14 @@ fn render_logs_table(f: &mut Frame, area: Rect, app: &App) {
 
             let message_cell = Cell::from(highlight_matches(&log.message, &app.search_text));
 
+            let stacktrace_mark = if log.stacktrace.is_empty() { "" } else { "✘" };
+
             Row::new(vec![
                 Cell::from(time),
                 Cell::from(log.severity.clone()).style(severity_style),
                 Cell::from(short_logger.to_string()),
                 message_cell,
+                Cell::from(stacktrace_mark).style(Style::default().fg(Color::Red)),
             ])
         })
         .collect();
@@ -285,6 +289,7 @@ fn render_logs_table(f: &mut Frame, area: Rect, app: &App) {
             Constraint::Length(7),
             Constraint::Length(35),
             Constraint::Fill(1),
+            Constraint::Length(4),
         ],
     )
     .header(header)

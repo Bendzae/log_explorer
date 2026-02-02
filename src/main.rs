@@ -318,7 +318,12 @@ async fn run(
                         KeyCode::Char('E') => {
                             if !app.logs.is_empty() {
                                 let content: String = app.logs.iter().map(|log| {
-                                    format!("[{}] {} [{}] {}", log.timestamp, log.severity, log.logger, log.message)
+                                    let mut line = format!("[{}] {} [{}] {}", log.timestamp, log.severity, log.logger, log.message);
+                                    if !log.stacktrace.is_empty() {
+                                        line.push('\n');
+                                        line.push_str(&log.stacktrace);
+                                    }
+                                    line
                                 }).collect::<Vec<_>>().join("\n");
                                 app.status = open_in_editor(terminal, &content, "log_explorer_page.log")?;
                             }
@@ -339,13 +344,23 @@ async fn run(
                             if let Some(log) = app.logs.get(app.log_index) {
                                 match app.context_cursor {
                                     0 => {
-                                        match Clipboard::new().and_then(|mut cb| cb.set_text(log.message.clone())) {
+                                        let mut text = log.message.clone();
+                                        if !log.stacktrace.is_empty() {
+                                            text.push('\n');
+                                            text.push_str(&log.stacktrace);
+                                        }
+                                        match Clipboard::new().and_then(|mut cb| cb.set_text(text)) {
                                             Ok(_) => app.status = "Copied to clipboard".to_string(),
                                             Err(e) => app.status = format!("Clipboard error: {}", e),
                                         }
                                     }
                                     1 => {
-                                        app.status = open_in_editor(terminal, &log.message, "log_explorer_entry.log")?;
+                                        let mut content = log.message.clone();
+                                        if !log.stacktrace.is_empty() {
+                                            content.push('\n');
+                                            content.push_str(&log.stacktrace);
+                                        }
+                                        app.status = open_in_editor(terminal, &content, "log_explorer_entry.log")?;
                                     }
                                     _ => {}
                                 }

@@ -25,6 +25,8 @@ pub struct LogEntry {
     pub method: String,
     #[serde(default, rename = "traceId")]
     pub trace_id: Option<String>,
+    #[serde(default)]
+    pub stacktrace: String,
 }
 
 #[derive(Debug)]
