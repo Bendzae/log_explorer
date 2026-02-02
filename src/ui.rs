@@ -40,6 +40,9 @@ pub fn render(f: &mut Frame, app: &App) {
         Pane::SearchMode => {
             render_dropdown(f, chunks[0], chunks[1], 6, &app.search_mode_filter);
         }
+        Pane::SearchFields => {
+            render_dropdown(f, chunks[0], chunks[1], 7, &app.search_fields_filter);
+        }
         Pane::Search | Pane::Logs => {}
         Pane::LogContext => {
             render_log_context_menu(f, chunks[1], app);
@@ -49,13 +52,14 @@ pub fn render(f: &mut Frame, app: &App) {
 
 // --- Filter bar (collapsed) ---
 
-const FILTER_CONSTRAINTS: [Constraint; 7] = [
+const FILTER_CONSTRAINTS: [Constraint; 8] = [
     Constraint::Length(25),
     Constraint::Length(30),
     Constraint::Length(18),
     Constraint::Length(20),
     Constraint::Length(16),
     Constraint::Fill(1),
+    Constraint::Length(18),
     Constraint::Length(18),
 ];
 
@@ -113,6 +117,14 @@ fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
         'M',
         app.focused == Pane::SearchMode,
         app.search_mode_filter.selected_value().unwrap_or("—"),
+    );
+    render_filter_chip(
+        f,
+        panes[7],
+        "Fields",
+        'F',
+        app.focused == Pane::SearchFields,
+        app.search_fields_filter.selected_value().unwrap_or("—"),
     );
 }
 

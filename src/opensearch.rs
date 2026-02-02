@@ -125,6 +125,7 @@ pub async fn fetch_logs(
     time_range: &str,
     search: Option<&str>,
     search_exact: bool,
+    search_all_fields: bool,
     size: i64,
     from: i64,
 ) -> Result<LogResult> {
@@ -142,7 +143,13 @@ pub async fn fetch_logs(
     }
     if let Some(q) = search {
         if search_exact {
-            must.push(json!({"match_phrase": {"message": q}}));
+            if search_all_fields {
+                must.push(json!({"multi_match": {"query": q, "type": "phrase", "fields": ["*"]}}));
+            } else {
+                must.push(json!({"match_phrase": {"message": q}}));
+            }
+        } else if search_all_fields {
+            must.push(json!({"query_string": {"query": format!("*{}*", q)}}));
         } else {
             must.push(json!({"query_string": {"default_field": "message", "query": format!("*{}*", q)}}));
         }

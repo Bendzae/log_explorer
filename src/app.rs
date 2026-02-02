@@ -13,6 +13,7 @@ pub enum Pane {
     Limit,
     Search,
     SearchMode,
+    SearchFields,
     Logs,
     LogContext,
 }
@@ -30,6 +31,7 @@ pub struct App {
     pub limit_filter: FilterField,
     pub search_text: String,
     pub search_mode_filter: FilterField,
+    pub search_fields_filter: FilterField,
 
     pub logs: Vec<LogEntry>,
     pub log_index: usize,
@@ -54,6 +56,11 @@ impl App {
             search_mode_filter: {
                 let mut f = FilterField::new();
                 f.set_items(vec!["Each word".to_string(), "Exact".to_string()]);
+                f
+            },
+            search_fields_filter: {
+                let mut f = FilterField::new();
+                f.set_items(vec!["All fields".to_string(), "Message only".to_string()]);
                 f
             },
             logs: Vec::new(),
@@ -110,6 +117,10 @@ impl App {
         self.search_mode_filter.selected_value() == Some("Exact")
     }
 
+    pub fn search_all_fields(&self) -> bool {
+        self.search_fields_filter.selected_value() != Some("Message only")
+    }
+
     pub fn total_pages(&self) -> u64 {
         let limit = self.selected_limit() as u64;
         if limit == 0 {
@@ -126,7 +137,8 @@ impl App {
             Pane::TimeRange => &mut self.time_filter,
             Pane::Limit => &mut self.limit_filter,
             Pane::SearchMode => &mut self.search_mode_filter,
-            Pane::Search | Pane::Logs | Pane::LogContext => unreachable!("active_filter_mut called while Search/Logs/LogContext is focused"),
+            Pane::SearchFields => &mut self.search_fields_filter,
+            _ => unreachable!("active_filter_mut called on non-filter pane"),
         }
     }
 
@@ -198,8 +210,9 @@ impl App {
         };
         let search = if self.search_text.is_empty() { None } else { Some(self.search_text.as_str()) };
         let search_exact = self.search_exact();
+        let search_all_fields = self.search_all_fields();
         self.status = format!("Fetching page {} from {}...", page, label);
-        match opensearch::fetch_logs(&self.config.endpoint_url, &self.config.aws_region, app.as_deref(), &env, severity.as_deref(), &time_range, search, search_exact, limit, from).await
+        match opensearch::fetch_logs(&self.config.endpoint_url, &self.config.aws_region, app.as_deref(), &env, severity.as_deref(), &time_range, search, search_exact, search_all_fields, limit, from).await
         {
             Ok(result) => {
                 self.status = format!("Loaded {} logs from {}", result.logs.len(), label);

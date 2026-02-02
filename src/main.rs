@@ -315,6 +315,10 @@ async fn run(
                             app.search_mode_filter.open();
                             app.focused = Pane::SearchMode;
                         }
+                        KeyCode::Char('F') => {
+                            app.search_fields_filter.open();
+                            app.focused = Pane::SearchFields;
+                        }
                         KeyCode::Char('E') => {
                             if !app.logs.is_empty() {
                                 let content: String = app.logs.iter().map(|log| {
@@ -393,7 +397,7 @@ async fn run(
                     },
 
                     // --- Filter dropdown focused (typing mode) ---
-                    Pane::Profile | Pane::Application | Pane::Severity | Pane::TimeRange | Pane::Limit | Pane::SearchMode => match key.code {
+                    Pane::Profile | Pane::Application | Pane::Severity | Pane::TimeRange | Pane::Limit | Pane::SearchMode | Pane::SearchFields => match key.code {
                         // Uppercase hotkeys always switch pane
                         KeyCode::Char('P') => {
                             app.profile_filter.open();
@@ -417,6 +421,10 @@ async fn run(
                             app.search_mode_filter.open();
                             app.focused = Pane::SearchMode;
                         }
+                        KeyCode::Char('F') => {
+                            app.search_fields_filter.open();
+                            app.focused = Pane::SearchFields;
+                        }
 
                         // Any other character -> filter input
                         KeyCode::Char(c) => {
@@ -432,7 +440,7 @@ async fn run(
                         KeyCode::Enter => {
                             let pane = app.focused;
                             app.active_filter_mut().confirm();
-                            if pane == Pane::SearchMode {
+                            if pane == Pane::SearchMode || pane == Pane::SearchFields {
                                 app.focused = Pane::Logs;
                             } else {
                                 app.status = "Fetching logs...".to_string();
