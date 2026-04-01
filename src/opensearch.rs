@@ -1,9 +1,13 @@
 use anyhow::Result;
 use opensearch::http::transport::{SingleNodeConnectionPool, TransportBuilder};
 use opensearch::{OpenSearch, SearchParts};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
 use url::Url;
+
+fn nullable_string<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Option::deserialize(d).map(|o: Option<String>| o.unwrap_or_default())
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LogEntry {
@@ -25,7 +29,7 @@ pub struct LogEntry {
     pub method: String,
     #[serde(default, rename = "traceId")]
     pub trace_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_string")]
     pub stacktrace: String,
 }
 
@@ -39,8 +43,16 @@ pub struct AvailableFilters {
 async fn create_client(endpoint_url: &str, aws_region: &str) -> Result<OpenSearch> {
     let url = Url::parse(endpoint_url)?;
     let conn_pool = SingleNodeConnectionPool::new(url);
+    // Only load ~/.aws/credentials (skip ~/.aws/config which may contain
+    // login_session directives that cause auth failures with the Rust SDK).
+    #[allow(deprecated)]
+    let profile_files = aws_config::profile::profile_file::ProfileFiles::builder()
+        .include_default_credentials_file(true)
+        .include_default_config_file(false)
+        .build();
     let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::Region::new(aws_region.to_string()))
+        .profile_files(profile_files)
         .load()
         .await;
     let transport = TransportBuilder::new(conn_pool)

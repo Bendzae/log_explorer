@@ -144,8 +144,10 @@ impl App {
 
     pub async fn load_filters(&mut self) {
         self.status = "Fetching available filters...".to_string();
+
         match opensearch::fetch_available_filters(&self.config.endpoint_url, &self.config.aws_region).await {
             Ok(filters) => {
+
                 self.status = format!(
                     "{} environments, {} applications — select filters and press Enter",
                     filters.environments.len(),
@@ -184,6 +186,7 @@ impl App {
                 self.limit_filter.select_value("50");
             }
             Err(e) => {
+
                 self.status = format!("Error loading filters: {}", e);
             }
         }
@@ -195,9 +198,11 @@ impl App {
 
     pub async fn fetch_page(&mut self, page: u64) {
         let Some(env) = self.selected_env().map(str::to_owned) else {
+
             self.status = "No environment selected".to_string();
             return;
         };
+
         let app = self.selected_app().map(str::to_owned);
         let severity = self.selected_severity().map(str::to_owned);
         let time_range = self.selected_time_range().to_owned();
@@ -215,6 +220,7 @@ impl App {
         match opensearch::fetch_logs(&self.config.endpoint_url, &self.config.aws_region, app.as_deref(), &env, severity.as_deref(), &time_range, search, search_exact, search_all_fields, limit, from).await
         {
             Ok(result) => {
+
                 self.status = format!("Loaded {} logs from {}", result.logs.len(), label);
                 self.total_hits = result.total;
                 self.page = page;
@@ -223,6 +229,7 @@ impl App {
                 self.focused = Pane::Logs;
             }
             Err(e) => {
+
                 self.status = format!("Error: {}", e);
             }
         }
